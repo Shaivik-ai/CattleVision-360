@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CattleVision 360 | Biometric Muzzle Kiosk & Health Diagnostics</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes scanline {
+      0% { top: 0%; opacity: 0.9; }
+      50% { top: 96%; opacity: 1; }
+      100% { top: 0%; opacity: 0.9; }
+    }
+    .scanner-beam {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, transparent, #10b981, #34d399, #10b981, transparent);
+      box-shadow: 0 0 16px 4px rgba(16, 185, 129, 0.65);
+      animation: scanline 2.2s ease-in-out infinite;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans selection:bg-emerald-500 selection:text-white">
+
+  <!-- Top Navigation & Live Server Status Bar -->
+  <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-30">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-xl">
+          CV
+        </div>
+        <div>
+          <h1 class="text-lg sm:text-xl font-bold tracking-tight text-white flex items-center gap-2">
+            CattleVision 360
+            <span class="text-xs font-medium px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              v1.0 Kiosk
+            </span>
+          </h1>
+          <p class="text-xs text-slate-400">YOLOv8 Muzzle Detection • CLAHE Rhinoglyphics • ResNet18 + FAISS ($512$-d)</p>
+        </div>
+      </div>
+
+      <!-- API Status Pill -->
+      <div class="flex items-center gap-3">
+        <div id="apiStatusBadge" class="flex items-center gap-2.5 px-3.5 py-1.5 rounded-full text-xs font-medium bg-slate-800 border border-slate-700 text-slate-300">
+          <span id="statusDot" class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+          <span id="statusText">Checking API (localhost:8000)...</span>
+        </div>
+        <button
+          onclick="checkApiHealth()"
+          title="Refresh Backend Connection"
+          class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 transition text-xs font-medium"
+        >
+          ↻ Ping API
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Workspace -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+
+      <!-- Left Column: Image Upload / Live Webcam Kiosk (5 cols) -->
+      <section class="lg:col-span-5 flex flex-col gap-6">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-base font-semibold text-white">1. Muzzle Capture Input</h2>
+            <div class="inline-flex rounded-lg bg-slate-800 p-1 border border-slate-700 text-xs">
+              <button id="tabUploadBtn" onclick="switchInputMode('upload')" class="px-3 py-1 rounded-md bg-emerald-600 text-white font-medium transition">
+                Upload File
+              </button>
+              <button id="tabCameraBtn" onclick="switchInputMode('camera')" class="px-3 py-1 rounded-md text-slate-400 hover:text-white transition">
+                Webcam
+              </button>
+            </div>
+          </div>
+
+          <!-- Upload Dropzone Mode -->
+          <div id="uploadModeContainer">
+            <label
+              id="dropZone"
+              for="fileInput"
+              class="relative flex flex-col items-center justify-center w-full h-72 border-2 border-dashed border-slate-700 hover:border-emerald-500/60 rounded-xl cursor-pointer bg-slate-950/60 hover:bg-slate-900/80 transition overflow-hidden group"
+            >
+              <!-- Default Prompt -->
+              <div id="uploadPrompt" class="flex flex-col items-center justify-center p-6 text-center">
+                <div class="w-14 h-14 mb-3 rounded-full bg-slate-800 group-hover:bg-emerald-500/10 border border-slate-700 group-hover:border-emerald-500/30 flex items-center justify-center text-slate-400 group-hover:text-emerald-400 transition">
+                  <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                  </svg>
+                </div>
+                <p class="text-sm font-medium text-slate-200 mb-1">
+                  Click to select or drag & drop cattle muzzle image
+                </p>
+                <p class="text-xs text-slate-500">Supports JPG, PNG, WEBP (Raw or Cropped Muzzle)</p>
+              </div>
+
+              <!-- Image Preview -->
+              <img id="imagePreview" class="hidden w-full h-full object-contain bg-black" alt="Selected Cattle Muzzle" />
+
+              <!-- Active Scanning Overlay -->
+              <div id="scanOverlay" class="hidden absolute inset-0 bg-slate-950/60 backdrop-blur-[2px] flex flex-col items-center justify-center">
+                <div class="scanner-beam"></div>
+                <div class="px-4 py-2 rounded-full bg-slate-900/90 border border-emerald-500/40 text-emerald-400 text-xs font-semibold tracking-wider uppercase shadow-lg">
+                  Running YOLOv8 + CLAHE + FAISS...
+                </div>
+              </div>
+
+              <input id="fileInput" type="file" accept="image/*" class="hidden" />
+            </label>
+          </div>
+
+          <!-- Webcam Capture Mode -->
+          <div id="cameraModeContainer" class="hidden">
+            <div class="relative w-full h-72 rounded-xl overflow-hidden bg-black border border-slate-700 flex items-center justify-center">
+              <video id="webcamVideo" autoplay playsinline class="w-full h-full object-cover"></video>
+              <canvas id="webcamCanvas" class="hidden"></canvas>
+              <div class="absolute inset-8 border-2 border-emerald-400/50 rounded-xl pointer-events-none flex items-end justify-center pb-2">
+                <span class="text-[11px] bg-slate-950/80 text-emerald-300 px-2.5 py-0.5 rounded-full">
+                  Align Cattle Muzzle Inside Frame
+                </span>
+              </div>
+            </div>
+            <button
+              onclick="captureWebcamFrame()"
+              class="mt-3 w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sm font-medium text-emerald-400 transition"
+            >
+              📸 Capture Frame for Scanning
+            </button>
+          </div>
+
+          <!-- Selected File Metadata & Actions -->
+          <div class="mt-4 flex items-center justify-between text-xs text-slate-400">
+            <span id="selectedFileName" class="truncate max-w-[230px]">No image selected</span>
+            <button id="clearBtn" onclick="resetSelection()" class="hidden text-rose-400 hover:underline">
+              Remove image
+            </button>
+          </div>
+
+          <!-- Primary Scan Button -->
+          <button
+            id="scanBtn"
+            onclick="submitScan()"
+            disabled
+            class="mt-5 w-full py-3.5 px-5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition shadow-lg disabled:opacity-40 disabled:cursor-not-allowed bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/30"
+          >
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+            </svg>
+            <span id="scanBtnText">Run Biometric Scan</span>
+          </button>
+
+          <!-- Error Banner -->
+          <div id="errorBox" class="hidden mt-4 p-3.5 rounded-xl bg-rose-950/60 border border-rose-500/40 text-rose-200 text-xs"></div>
+        </div>
+
+        <!-- Pipeline Architecture Mini-Card -->
+        <div class="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 text-xs text-slate-400 space-y-2.5">
+          <div class="font-semibold text-slate-200 flex items-center justify-between">
+            <span>Inference Pipeline Stages</span>
+            <span class="font-mono text-[11px] text-emerald-400">POST /api/scan</span>
+          </div>
+          <ol class="list-decimal list-inside space-y-1.5 text-slate-400">
+            <li><strong class="text-slate-300">YOLOv8n (`best.pt`):</strong> Locates & crops raw muzzle bounding box.</li>
+            <li><strong class="text-slate-300">CLAHE Filter:</strong> Enhances rhinoglyphic ridge & bead contrast.</li>
+            <li><strong class="text-slate-300">ResNet18 (`resnet_arcface.pth`):</strong> Extracts $512$-d feature vector.</li>
+            <li><strong class="text-slate-300">FAISS (`IndexFlatL2`):</strong> Nearest-neighbor search across $4,923$ embeddings.</li>
+          </ol>
+        </div>
+      </section>
+
+      <!-- Right Column: Biometric & Health Diagnostic Results (7 cols) -->
+      <section class="lg:col-span-7 flex flex-col gap-6">
+
+        <!-- Empty State Placeholder -->
+        <div id="emptyResultState" class="bg-slate-900/50 border border-slate-800 rounded-2xl p-12 flex flex-col items-center justify-center text-center h-full min-h-[420px]">
+          <div class="w-16 h-16 rounded-2xl bg-slate-800/80 border border-slate-700 flex items-center justify-center text-slate-500 mb-4">
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+          </div>
+          <h3 class="text-base font-semibold text-slate-200">Awaiting Cattle Muzzle Scan</h3>
+          <p class="text-xs text-slate-400 max-w-md mt-1.5 leading-relaxed">
+            Upload a muzzle image on the left and click <span class="text-emerald-400 font-medium">Run Biometric Scan</span> to view the matched Cattle ID, FAISS $L_2$ distance, health telemetry, and CowGPT diagnosis.
+          </p>
+        </div>
+
+        <!-- Populated Results Container -->
+        <div id="resultsContainer" class="hidden space-y-6">
+
+          <!-- Top Identity Banner -->
+          <div class="bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950/40 border border-emerald-500/30 rounded-2xl p-6 shadow-xl flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs uppercase tracking-wider font-semibold text-emerald-400">Identified Livestock ID</span>
+                <span id="resModeBadge" class="text-[11px] font-medium px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  Production
+                </span>
+              </div>
+              <h2 id="resCowId" class="text-2xl sm:text-3xl font-extrabold text-white font-mono mt-1 tracking-tight">
+                COW_CATTLE_0000
+              </h2>
+            </div>
+
+            <div class="text-right">
+              <span class="text-xs text-slate-400 block">Match Confidence</span>
+              <span id="resConfidenceText" class="text-2xl font-bold text-emerald-400 font-mono">--%</span>
+            </div>
+          </div>
+
+          <!-- Biometrics & Health Telemetry Grid -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+            <!-- Biometric Vector Metrics Card -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+              <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                <h3 class="text-sm font-semibold text-white">Biometric Verification</h3>
+                <span class="text-xs font-mono text-slate-400">FAISS IndexFlatL2</span>
+              </div>
+
+              <!-- Confidence Bar -->
+              <div>
+                <div class="flex justify-between text-xs mb-1.5">
+                  <span class="text-slate-400">Similarity Score</span>
+                  <span id="resConfBarLabel" class="font-mono text-emerald-400 font-semibold">0.0000</span>
+                </div>
+                <div class="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden">
+                  <div id="resConfBar" class="h-full bg-emerald-500 rounded-full transition-all duration-500" style="width: 0%"></div>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-2 gap-3 pt-1">
+                <div class="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3">
+                  <span class="text-[11px] text-slate-400 block">L2 Distance Score</span>
+                  <span id="resL2Distance" class="text-sm font-mono font-semibold text-white mt-0.5 block">0.0000</span>
+                </div>
+                <div class="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3">
+                  <span class="text-[11px] text-slate-400 block">YOLOv8 Muzzle Box</span>
+                  <span id="resYoloStatus" class="text-sm font-semibold text-emerald-400 mt-0.5 block">Detected</span>
+                </div>
+              </div>
+
+              <div class="flex items-center justify-between text-xs pt-1 text-slate-400">
+                <span>CLAHE Enhancement:</span>
+                <span id="resClaheStatus" class="text-emerald-400 font-medium">Applied (clip=2.0, 8x8)</span>
+              </div>
+            </div>
+
+            <!-- Health Engine Card -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+              <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                <h3 class="text-sm font-semibold text-white">Health & Vitals Engine</h3>
+                <span id="resTempBadge" class="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  Temp Normal
+                </span>
+              </div>
+
+              <div class="space-y-3 text-xs">
+                <div class="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3 flex items-center justify-between">
+                  <span class="text-slate-400">Posture Analysis</span>
+                  <span id="resPosture" class="font-medium text-slate-200">--</span>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                  <div class="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3">
+                    <span class="text-[11px] text-slate-400 block">Skin Lesion Area</span>
+                    <span id="resLesion" class="text-sm font-mono font-semibold text-white mt-0.5 block">0.0%</span>
+                  </div>
+                  <div class="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3">
+                    <span class="text-[11px] text-slate-400 block">Rumination Est.</span>
+                    <span id="resRumination" class="text-sm font-mono font-semibold text-white mt-0.5 block">0.0 hrs/day</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- CowGPT RAG Diagnosis & WhatsApp Alert Card -->
+          <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div class="flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                <h3 class="text-sm font-semibold text-white">CowGPT RAG Veterinary Advisory</h3>
+              </div>
+              <button
+                onclick="copyHindiAlert()"
+                class="text-xs px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 transition"
+              >
+                📋 Copy Hindi WhatsApp Alert
+              </button>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              <div class="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 space-y-1">
+                <span class="text-slate-400 font-medium block">Preliminary Diagnosis</span>
+                <p id="resDiagnosis" class="text-slate-200 leading-relaxed">--</p>
+              </div>
+              <div class="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 space-y-1">
+                <span class="text-slate-400 font-medium block">Recommended Action</span>
+                <p id="resAction" class="text-slate-200 leading-relaxed">--</p>
+              </div>
+            </div>
+
+            <div class="bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-3.5 flex items-center justify-between gap-4">
+              <div>
+                <span class="text-[11px] uppercase tracking-wider text-emerald-400 font-semibold block">
+                  Farmer WhatsApp Notification (Hindi)
+                </span>
+                <p id="resHindiAlert" class="text-sm text-white font-medium mt-0.5">--</p>
+              </div>
+              <span id="copyConfirm" class="hidden text-xs text-emerald-400 font-semibold">Copied!</span>
+            </div>
+          </div>
+
+          <!-- Raw JSON Response Accordion -->
+          <details class="bg-slate-900/70 border border-slate-800 rounded-xl text-xs">
+            <summary class="px-4 py-3 cursor-pointer font-medium text-slate-300 hover:text-white select-none">
+              View Raw `/api/scan` JSON Payload
+            </summary>
+            <pre id="rawJsonOutput" class="p-4 bg-slate-950 text-emerald-300 font-mono text-[11px] overflow-x-auto border-t border-slate-800 rounded-b-xl"></pre>
+          </details>
+
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <script>
+    const API_BASE_URL = "http://localhost:8000";
+    let selectedFile = null;
+    let webcamStream = null;
+
+    const fileInput = document.getElementById("fileInput");
+    const dropZone = document.getElementById("dropZone");
+    const imagePreview = document.getElementById("imagePreview");
+    const uploadPrompt = document.getElementById("uploadPrompt");
+    const selectedFileName = document.getElementById("selectedFileName");
+    const clearBtn = document.getElementById("clearBtn");
+    const scanBtn = document.getElementById("scanBtn");
+    const scanBtnText = document.getElementById("scanBtnText");
+    const scanOverlay = document.getElementById("scanOverlay");
+    const errorBox = document.getElementById("errorBox");
+
+    // 1. Check Backend API Health on Load
+    async function checkApiHealth() {
+      const statusDot = document.getElementById("statusDot");
+      const statusText = document.getElementById("statusText");
+      try {
+        const res = await fetch(`${API_BASE_URL}/`);
+        if (!res.ok) throw new Error("Non-200 response");
+        const data = await res.json();
+        statusDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-400";
+        statusText.textContent = `Online • ${data.mode} Mode (${data.faiss_vectors} Vectors • ${data.device.toUpperCase()})`;
+      } catch (err) {
+        statusDot.className = "w-2.5 h-2.5 rounded-full bg-rose-500";
+        statusText.textContent = "Backend Offline (Start uvicorn on port 8000)";
+      }
+    }
+
+    // 2. Handle File Selection & Drag-and-Drop
+    fileInput.addEventListener("change", (e) => {
+      if (e.target.files && e.target.files[0]) {
+        handleFile(e.target.files[0]);
+      }
+    });
+
+    dropZone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      dropZone.classList.add("border-emerald-500");
+    });
+
+    dropZone.addEventListener("dragleave", () => {
+      dropZone.classList.remove("border-emerald-500");
+    });
+
+    dropZone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      dropZone.classList.remove("border-emerald-500");
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        handleFile(e.dataTransfer.files[0]);
+      }
+    });
+
+    function handleFile(file) {
+      if (!file.type.startsWith("image/")) {
+        showError("Please select a valid image file (JPG, PNG, WEBP).");
+        return;
+      }
+      hideError();
+      selectedFile = file;
+      selectedFileName.textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+      clearBtn.classList.remove("hidden");
+      scanBtn.disabled = false;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        imagePreview.src = e.target.result;
+        imagePreview.classList.remove("hidden");
+        uploadPrompt.classList.add("hidden");
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function resetSelection() {
+      selectedFile = null;
+      fileInput.value = "";
+      imagePreview.src = "";
+      imagePreview.classList.add("hidden");
+      uploadPrompt.classList.remove("hidden");
+      selectedFileName.textContent = "No image selected";
+      clearBtn.classList.add("hidden");
+      scanBtn.disabled = true;
+      hideError();
+    }
+
+    // 3. Switch Between Upload & Webcam Mode
+    async function switchInputMode(mode) {
+      const uploadContainer = document.getElementById("uploadModeContainer");
+      const cameraContainer = document.getElementById("cameraModeContainer");
+      const tabUploadBtn = document.getElementById("tabUploadBtn");
+      const tabCameraBtn = document.getElementById("tabCameraBtn");
+
+      if (mode === "camera") {
+        uploadContainer.classList.add("hidden");
+        cameraContainer.classList.remove("hidden");
+        tabCameraBtn.className = "px-3 py-1 rounded-md bg-emerald-600 text-white font-medium transition";
+        tabUploadBtn.className = "px-3 py-1 rounded-md text-slate-400 hover:text-white transition";
+
+        try {
+          webcamStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+          document.getElementById("webcamVideo").srcObject = webcamStream;
+        } catch (err) {
+          showError("Could not access webcam. Please check camera permissions or use Upload File mode.");
+        }
+      } else {
+        stopWebcam();
+        cameraContainer.classList.add("hidden");
+        uploadContainer.classList.remove("hidden");
+        tabUploadBtn.className = "px-3 py-1 rounded-md bg-emerald-600 text-white font-medium transition";
+        tabCameraBtn.className = "px-3 py-1 rounded-md text-slate-400 hover:text-white transition";
+      }
+    }
+
+    function stopWebcam() {
+      if (webcamStream) {
+        webcamStream.getTracks().forEach((track) => track.stop());
+        webcamStream = null;
+      }
+    }
+
+    function captureWebcamFrame() {
+      const video = document.getElementById("webcamVideo");
+      const canvas = document.getElementById("webcamCanvas");
+      if (!video.videoWidth) return;
+
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      canvas.toBlob((blob) => {
+        if (blob) {
+          const capturedFile = new File([blob], `kiosk_capture_${Date.now()}.jpg`, { type: "image/jpeg" });
+          switchInputMode("upload");
+          handleFile(capturedFile);
+        }
+      }, "image/jpeg", 0.92);
+    }
+
+    // 4. Submit Image to POST /api/scan
+    async function submitScan() {
+      if (!selectedFile) return;
+      hideError();
+
+      scanBtn.disabled = true;
+      scanBtnText.textContent = "Scanning Muzzle Biometrics...";
+      scanOverlay.classList.remove("hidden");
+
+      const formData = new FormData();
+      formData.append("file", selectedFile);
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/scan`, {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.detail || `Server responded with status ${response.status}`);
+        }
+
+        const data = await response.json();
+        renderScanResults(data);
+        checkApiHealth();
+      } catch (err) {
+        showError(`Scan failed: ${err.message}. Ensure FastAPI is running at ${API_BASE_URL}.`);
+      } finally {
+        scanBtn.disabled = false;
+        scanBtnText.textContent = "Run Biometric Scan";
+        scanOverlay.classList.add("hidden");
+      }
+    }
+
+    // 5. Populate Dashboard with Scan Results
+    function renderScanResults(data) {
+      document.getElementById("emptyResultState").classList.add("hidden");
+      document.getElementById("resultsContainer").classList.remove("hidden");
+
+      document.getElementById("resCowId").textContent = data.cow_id || "UNKNOWN";
+      document.getElementById("resModeBadge").textContent = data.mode || "Production";
+
+      const conf = data.biometrics?.muzzle_match_confidence ?? 0;
+      const pct = Math.min(100, Math.max(0, (conf * 100).toFixed(1)));
+      document.getElementById("resConfidenceText").textContent = `${pct}%`;
+      document.getElementById("resConfBarLabel").textContent = `${conf} (${pct}%)`;
+      document.getElementById("resConfBar").style.width = `${pct}%`;
+
+      document.getElementById("resL2Distance").textContent = data.biometrics?.l2_distance_score ?? "--";
+
+      const yoloDetected = data.biometrics?.yolo_muzzle_detected;
+      const yoloEl = document.getElementById("resYoloStatus");
+      yoloEl.textContent = yoloDetected ? "Muzzle Cropped" : "Full Image Fallback";
+      yoloEl.className = yoloDetected
+        ? "text-sm font-semibold text-emerald-400 mt-0.5 block"
+        : "text-sm font-semibold text-amber-400 mt-0.5 block";
+
+      document.getElementById("resPosture").textContent = data.health_engine?.detected_posture ?? "--";
+      document.getElementById("resLesion").textContent = `${data.health_engine?.lesion_surface_area_pct ?? 0}%`;
+      document.getElementById("resRumination").textContent = `${data.health_engine?.simulated_rumination_hrs ?? 0} hrs/day`;
+
+      const tempAlert = data.health_engine?.temperature_alert;
+      const tempBadge = document.getElementById("resTempBadge");
+      tempBadge.textContent = tempAlert ? "Fever Alert" : "Temp Normal";
+      tempBadge.className = tempAlert
+        ? "text-[11px] px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30"
+        : "text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
+
+      document.getElementById("resDiagnosis").textContent = data.cowgpt_rag_diagnosis?.preliminary_diagnosis ?? "--";
+      document.getElementById("resAction").textContent = data.cowgpt_rag_diagnosis?.action ?? "--";
+      document.getElementById("resHindiAlert").textContent = data.cowgpt_rag_diagnosis?.whatsapp_alert_hindi ?? "--";
+
+      document.getElementById("rawJsonOutput").textContent = JSON.stringify(data, null, 2);
+    }
+
+    function copyHindiAlert() {
+      const text = document.getElementById("resHindiAlert").textContent;
+      navigator.clipboard.writeText(text);
+      const confirmEl = document.getElementById("copyConfirm");
+      confirmEl.classList.remove("hidden");
+      setTimeout(() => confirmEl.classList.add("hidden"), 2000);
+    }
+
+    function showError(msg) {
+      errorBox.textContent = msg;
+      errorBox.classList.remove("hidden");
+    }
+
+    function hideError() {
+      errorBox.classList.add("hidden");
+    }
+
+    // Initial ping on page load
+    checkApiHealth();
+  </script>
+</body>
+</html>

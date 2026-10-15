@@ -1,0 +1,4 @@
+venv/ 
+api/index/*.bin 
+api/models/*.pt 
+api/models/*.pth 
