@@ -1,4 +1,14 @@
-venv/ 
-api/index/*.bin 
-api/models/*.pt 
-api/models/*.pth 
+# Ignore raw datasets and YOLO training caches
+local_dataset/
+dataset/
+yolo_dataset/
+runs/
+*.zip
+*.rar
+
+# Ignore Python virtual environments and cache
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
