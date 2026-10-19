@@ -54,18 +54,24 @@ Combined with an automated **CowGPT RAG Veterinary Advisory Engine**, the system
 ```text
 CattleVision-360/
 ├── api/
-│   ├── main.py                  # FastAPI server with strict YOLO gate & dynamic vitals
-│   ├── requirements.txt         # Pinned python dependencies
+│   ├── main.py                # FastAPI production server
+│   ├── retrain.py             # Full retraining pipeline script
+│   ├── label_muzzle.py        # Bounding box labeling & dataset prep (Otsu)
+│   ├── README.md              # Retraining instructions
 │   ├── models/
-│   │   ├── best.pt              # YOLOv8n muzzle detection weights
-│   │   └── resnet_arcface.pth   # Custom ResNet18 512-d feature extractor weights
+│   │   ├── best.pt            # Trained YOLOv8s muzzle detector (99.5% mAP)
+│   │   ├── resnet_arcface.pth # ResNet18 ArcFace embedding weights
+│   │   └── model_info.json    # Captured training metrics
 │   └── index/
-│       ├── cattle_muzzle_faiss.bin # FAISS vector index (IndexFlatL2, dim=512)
-│       └── label_map.json       # FAISS row index -> Cattle ID string mapping
+│       ├── cattle_muzzle_faiss.bin # FAISS IndexFlatIP vector database (4923 vectors)
+│       └── label_map.json          # Row index to Cow ID string map
+├── notebooks/
+│   ├── CattleVision360_Colab_Retrain_Fixed.ipynb # Updated Colab training notebook
+│   └── Muzzle_Detector.ipynb                     # Initial exploratory notebook
 ├── frontend/
-│   └── index.html               # Single-file Tailwind Kiosk dashboard UI
-├── .gitignore                   # Excludes venv, heavy binaries, and local configs
-└── README.md                    # Project documentation
+│   └── index.html             # Live Kiosk Web UI (File Upload + Webcam)
+├── Project_ROADMAP.md         # System design & architectural blueprint
+└── README.md
 ```
 
 ---
